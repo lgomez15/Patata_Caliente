@@ -49,6 +49,7 @@ char *argv[];
 	int addrlen, i, j, errcode;
     /* This example uses TAM_BUFFER byte messages. */
 	char buf[TAM_BUFFER];
+	char bufr[TAM_BUFFER];
 
 	if (argc != 2) {
 		fprintf(stderr, "Usage:  %s <remote host>\n", argv[0]);
@@ -126,37 +127,68 @@ char *argv[];
 			argv[1], ntohs(myaddr_in.sin_port), (char *) ctime(&timevar));
 
 
+
 	while(1)
 	{
 		//sent an user input to the server
 		printf("C: ");
-		scanf("%s", buf);
+		//read with fgets
+		fflush(stdin);
+		//strcpy(buf, "");
+		//clean buf before reading
 
-		//add a \r\n to the end of the string
+		fgets(buf, TAM_BUFFER, stdin);
+		//remove \n from the string
+		buf[strlen(buf)-1] = '\0';
+		//Add \r\n to the end of the string
 		strcat(buf, "\r\n");
 
 		//send the string to the server
-		if (send(s, buf, strlen(buf), 0) != strlen(buf)) {
+		if (send(s, buf, TAM_BUFFER, 0) != TAM_BUFFER) {
 			fprintf(stderr, "%s: Connection aborted on error ",	argv[0]);
 			fprintf(stderr, "on send number %d\n", i);
 			exit(1);
 		}
 
+		while (i = recv(s, bufr, TAM_BUFFER, 0)) {
+			if (i == -1) 
+			{
+				perror(argv[0]);
+				fprintf(stderr, "%s: error reading result\n", argv[0]);
+				exit(1);
+			}
+
+			while (i < TAM_BUFFER) 
+			{
+				j = recv(s, &bufr[i], TAM_BUFFER-i, 0);
+				if (j == -1) {
+						perror(argv[0]);
+						fprintf(stderr, "%s: error reading result\n", argv[0]);
+						exit(1);
+				}
+				i += j;
+			}
+			
+			break;
+		}
+
 		//checks is conexion is done
-		if (strcmp(buf, "S:221 Cerrando el servicio") == 0) {
+		if (strcmp(bufr, "S:221 Cerrando el servicio") == 0) {
 			printf("Client requested to exit. Closing connection.\n");
 			return 0;
 		}
-		
-		/* Read the responses sent back from the server. */
-		i = 0;
-		while ((j = read(s, buf, TAM_BUFFER)) > 0) {
-			i++;
-			buf[j] = '\0';
-			printf("%s", buf);
-		}
+
+		printf("%s\n", bufr);
 	}
 
+
+	/* Read the responses sent back from the server. */
+	// i = 0;
+	// while ((j = read(s, buf, TAM_BUFFER)) > 0) {
+	// 	i++;
+	// 	buf[j] = '\0';
+	// 	printf("%s", buf);
+	// }
 
 	/* Now, shutdown the connection for further sends.
 	* This will cause the server to receive an end-of-file

@@ -32,21 +32,21 @@
 #define STATE_DONE 105
 
 char *preguntas[] = {
-	"250 ¿Cuántos estados hay en Estados Unidos?",
-	"250 ¿A cuánto está la prima de riesgo hoy?",
-	"250 ¿Cuántos años tiene el rey?",
-	"250 ¿Cuántos años tiene la reina?",
-	"250 ¿Cuántos años tiene el principe?",
-	"250 ¿Cuántos años tiene la princesa?",
-	"250 ¿Cuantos balones de oro tiene Messi?",
-	"250 ¿Cuantos balones de oro tiene Cristiano Ronaldo?",
-	"250 ¿Cuantos balones de oro tiene Neymar?",
-	"250 ¿Cuantos balones de oro tiene Iniesta?",
-	"250 ¿Cuantos Grand Slam tiene Nadal?",
-	"250 ¿Cuantos Grand Slam tiene Federer?",
-	"250 ¿Cuantos Grand Slam tiene Djokovic?",
-	"250 ¿En que año acabó la segunda guerra mundial?",
-	"250 ¿En que año empezó la segunda guerra mundial?",
+	"S:250 ¿Cuántos estados hay en Estados Unidos?",
+	"S:250 ¿A cuánto está la prima de riesgo hoy?",
+	"S:250 ¿Cuántos años tiene el rey?",
+	"S:250 ¿Cuántos años tiene la reina?",
+	"S:250 ¿Cuántos años tiene el principe?",
+	"S:250 ¿Cuántos años tiene la princesa?",
+	"S:250 ¿Cuantos balones de oro tiene Messi?",
+	"S:250 ¿Cuantos balones de oro tiene Cristiano Ronaldo?",
+	"S:250 ¿Cuantos balones de oro tiene Neymar?",
+	"S:250 ¿Cuantos balones de oro tiene Iniesta?",
+	"S:250 ¿Cuantos Grand Slam tiene Nadal?",
+	"S:250 ¿Cuantos Grand Slam tiene Federer?",
+	"S:250 ¿Cuantos Grand Slam tiene Djokovic?",
+	"S:250 ¿En que año acabó la segunda guerra mundial?",
+	"S:250 ¿En que año empezó la segunda guerra mundial?",
 };
 
 int respuestas[] = {
@@ -392,27 +392,25 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in)
 		 */
 
 	int estado = STATE_WAIT_HOLA;
-	char * request = (char *)malloc(sizeof(char) * 100);
-	char * response = NULL;
+	int pregunta = 0;
 	while (len = recv(s, buf, TAM_BUFFER, 0) && estado != STATE_DONE) {
 		if (len == -1) errout(hostname); 
-		
-		printf("Received request number %d\n", reqcnt);
+		char * request = (char *)malloc(sizeof(char) * 100);
+	char * response = NULL;
+		printf("Received request number %d with length: %d and string %s\n", reqcnt, len, buf);
 
-		// while ((buf[len-1] != '\n' && buf[len-2] != '\r') && len < TAM_BUFFER) {
+		// while ((buf[len-1] != '\n' && buf[len-2] != '\r') {
 		// 	len1 = recv(s, &buf[len], TAM_BUFFER-len, 0);
 		// 	if (len1 == -1) errout(hostname);
 		// 	len += len1;
 		// }
-		//print the request
 
 		strcpy(request,buf);
 		printf("Request content:%s", request);
 		
-		int pregunta = 0;
+		
 		response = analizadorSintactico(request,&pregunta,&estado);
-		printf("Respuesta:%s", response);
-		strcpy(buf,response);
+		printf("\nRespuesta:%s", response);
 		
 		/* Increment the request count. */
 		reqcnt++;
@@ -420,9 +418,9 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in)
 		sleep(1);
 
 		/* Send a response back to the client. */
-		if (send(s, buf, TAM_BUFFER, 0) != TAM_BUFFER) errout(hostname);
-		printf("Sent response number %d", reqcnt);
-		printf("Response: %s", buf);
+		if (send(s, response, TAM_BUFFER, 0) != TAM_BUFFER) errout(hostname);
+		printf("\nSent response number %d currentSTATE: %d", reqcnt,estado);
+		printf("\nResponse: %s", response);
 	}
 
 		/* The loop has terminated, because there are no
@@ -506,19 +504,6 @@ void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in)
          }   
  }
 
- char* obtenerPregunta() {
-    char* frase = malloc(100);  // Asigna memoria para la cadena (ajusta el tamaño según sea necesario)
-    if (frase == NULL) {
-        fprintf(stderr, "Error al asignar memoria para la frase.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Copia la frase en la cadena
-    strcpy(frase, " 250 Hola, esto es un ejemplo de pregunta.");
-
-    return frase;
-}
-
 char *obtenerPreguntaAleatoria(int * pregunta) 
 {
 
@@ -538,41 +523,44 @@ char *obtenerPreguntaAleatoria(int * pregunta)
 
  char * analizadorSintactico(char *mensaje, int * pregunta, int *estado)
  {
+	fflush(stdout);
 	char *respuesta = NULL;
 	char * aux = (char *)malloc(sizeof(char) * 100);
 
-	//reservar memoria para la respuesta
 	respuesta = (char *)malloc(sizeof(char) * 100);
 
-	//Analizar cada linea del mensaje
-	char *linea = strtok(mensaje, "\n");
-
-	printf("%s %d %d \n", mensaje,*pregunta,*estado);
+	char *linea;
+	strcpy(linea, mensaje);
+	
 	switch (*estado)
 	{
 		case STATE_WAIT_HOLA:
 			printf("Estado: STATE_WAIT_HOLA\n");
-			if(strcmp(linea, "HOLA") == 0)
+			if(strcmp(linea, "HOLA\r\n") == 0)
 			{
 				aux = obtenerPreguntaAleatoria(pregunta);
 				strcpy(respuesta, aux);
 				*estado = STATE_JUGANDO;
+				printf("RespuestaAS:%s\n", respuesta);
 				return respuesta;
 			} 
 			else
 			{
 				*estado = STATE_WAIT_HOLA;
 				strcpy(respuesta, "S:500 Error de sintaxis");
+				printf("Respuesta:%s\n", respuesta);
 				return respuesta;
 			}
-		break;
+			break;
 		case STATE_JUGANDO:
 			printf("Estado: STATE_JUGANDO\n");
 			if (strncmp(mensaje, "RESPUESTA", 9) == 0) 
 			{
+				printf("sintaxis ""RESPUESTA"" correcta\n");
 				int numero;
 				if (sscanf(mensaje + 10, "%d", &numero) == 1) 
 				{
+					printf("sintaxis ""RESPUESTA (n)"" correcta\n");
 					if (numero == respuestas[*pregunta]) 
 					{
 						*estado = STATE_WAIT_ADIOS;
@@ -608,16 +596,16 @@ char *obtenerPreguntaAleatoria(int * pregunta)
 				strcpy(respuesta, "S:500 Error de sintaxis");
 				return respuesta;
 			}
-		break;
+			break;
 		case STATE_WAIT_ADIOS:
 			printf("Estado: STATE_WAIT_ADIOS\n");
-			if(strcmp(linea, "ADIOS") == 0)
+			if(strcmp(linea, "ADIOS\r\n") == 0)
 			{
 				strcpy(respuesta, "S:221 Cerrando el servicio");
 				*estado = STATE_DONE;
 				return respuesta;
 			} 
-			else if(strcmp(linea,"+") == 0)
+			else if(strcmp(linea,"+\r\n") == 0)
 			{
 				*estado = STATE_JUGANDO;
 				aux = obtenerPreguntaAleatoria(pregunta);
@@ -630,7 +618,7 @@ char *obtenerPreguntaAleatoria(int * pregunta)
 				strcpy(respuesta, "S:500 Error de sintaxis");
 				return respuesta;
 			}
-		break;
+			break;
 	}
 }
 
