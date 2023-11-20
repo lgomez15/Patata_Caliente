@@ -36,7 +36,7 @@ extern int errno;
 #define BUFFERSIZE	1024	/* maximum size of packets to be received */
 #define PUERTO 22603
 #define TIMEOUT 6
-#define MAXHOST 512
+#define TAM_BUFFER 512
 /*
  *			H A N D L E R
  *
@@ -74,7 +74,7 @@ char *argv[];
     struct in_addr reqaddr;		/* for returned internet address */
     int	addrlen, n_retry;
     struct sigaction vec;
-   	char hostname[MAXHOST];
+   	char buffer[TAM_BUFFER];
    	struct addrinfo hints, *res;
 
 	if (argc != 3) {
@@ -150,63 +150,69 @@ char *argv[];
      /* puerto del servidor en orden de red*/
 	 servaddr_in.sin_port = htons(PUERTO);
 
-   /* Registrar SIGALRM para no quedar bloqueados en los recvfrom */
-    vec.sa_handler = (void *) handler;
-    vec.sa_flags = 0;
+	/* Set up the signal handler. */
+	vec.sa_handler = handler;
+	vec.sa_flags = 0;
+	sigemptyset(&vec.sa_mask);
     if ( sigaction(SIGALRM, &vec, (struct sigaction *) 0) == -1) {
             perror(" sigaction(SIGALRM)");
             fprintf(stderr,"%s: unable to register the SIGALRM signal\n", argv[0]);
             exit(1);
-        }
-	
-    n_retry=RETRIES;
-    
-	while (n_retry > 0) {
-		/* Send the request to the nameserver. */
-        if (sendto (s, argv[2], strlen(argv[2]), 0, (struct sockaddr *)&servaddr_in,
-				sizeof(struct sockaddr_in)) == -1) {
-        		perror(argv[0]);
-        		fprintf(stderr, "%s: unable to send request\n", argv[0]);
-        		exit(1);
-        	}
-		/* Set up a timeout so I don't hang in case the packet
-		 * gets lost.  After all, UDP does not guarantee
-		 * delivery.
-		 */
-	    alarm(TIMEOUT);
-		/* Wait for the reply to come in. */
-        if (recvfrom (s, &reqaddr, sizeof(struct in_addr), 0,
-						(struct sockaddr *)&servaddr_in, &addrlen) == -1) {
-    		if (errno == EINTR) {
-    				/* Alarm went off and aborted the receive.
-    				 * Need to retry the request if we have
-    				 * not already exceeded the retry limit.
-    				 */
- 		         printf("attempt %d (retries %d).\n", n_retry, RETRIES);
-  	 		     n_retry--; 
-                    } 
-            else  {
-				printf("Unable to get response from");
-				exit(1); 
-                }
-              } 
-        else {
-            alarm(0);
-            /* Print out response. */
-            if (reqaddr.s_addr == ADDRNOTFOUND) 
-               printf("Host %s unknown by nameserver %s\n", argv[2], argv[1]);
-            else {
-                /* inet_ntop para interoperatividad con IPv6 */
-                if (inet_ntop(AF_INET, &reqaddr, hostname, MAXHOST) == NULL)
-                   perror(" inet_ntop \n");
-                printf("Address for %s is %s\n", argv[2], hostname);
-                }	
-            break;	
-            }
-  }
+    }
 
-    if (n_retry == 0) {
-       printf("Unable to get response from");
-       printf(" %s after %d attempts.\n", argv[1], RETRIES);
-       }
+	while (1)
+	{
+		// Send a message to the server
+		fflush(stdout);
+		printf("C:");
+		fgets(buffer, TAM_BUFFER, stdin);
+
+		//delete /n
+		buffer[strlen(buffer)-1] = '\0';
+		//add \r\n
+		strcat(buffer, "\r\n");
+
+		if (sendto(s, buffer, strlen(buffer), 0, (struct sockaddr *) &servaddr_in, sizeof(struct sockaddr_in)) == -1) {
+			perror(argv[0]);
+			fprintf(stderr, "%s: unable to send message\n", argv[0]);
+			exit(1);
+		}
+
+		// Wait for a reply
+		n_retry = 0;
+		do {
+			alarm(TIMEOUT);
+			if (recvfrom(s, buffer, TAM_BUFFER, 0, (struct sockaddr *) &servaddr_in, &addrlen) == -1) {
+				if (errno == EINTR) {
+					n_retry++;
+					printf("%s\n", buffer);
+					fflush(stdout);
+				} else {
+					perror(argv[0]);
+					fprintf(stderr, "%s: unable to receive message\n", argv[0]);
+					exit(1);
+				}
+			} else {
+				n_retry = 0;
+			}
+		} while (n_retry != 0 && n_retry < RETRIES);
+
+		if (n_retry == 0) {
+			alarm(0);
+			if(strcmp(buffer, "S:221 Cerrando el servicio") == 0)
+				{
+					printf("%s\n", buffer);
+					exit(0);
+				}
+			printf("%s\n", buffer);
+		} else {
+			printf("No response from server\n");
+		}
+
+
+	}
+	
+	/* Close the socket. */
+	close(s);
+	exit(0);
 }

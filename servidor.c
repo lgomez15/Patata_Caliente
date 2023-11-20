@@ -82,6 +82,7 @@ char *obtenerPreguntaAleatoria(int * pregunta);
 char * analizadorSintactico(char *mensaje, int * pregunta, int *estado);
 char* obtenerPregunta();
 void serverTCP(int s, struct sockaddr_in peeraddr_in);
+void serverUDPH(int s, struct sockaddr_in clientaddr_in);
 void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in);
 void errout(char *);		/* declare error out routine */
 
@@ -290,18 +291,9 @@ char *argv[];
                 * room is left at the end of the buffer
                 * for a null character.
                 */
-                cc = recvfrom(s_UDP, buffer, BUFFERSIZE - 1, 0,
-                   (struct sockaddr *)&clientaddr_in, &addrlen);
-                if ( cc == -1) {
-                    perror(argv[0]);
-                    printf("%s: recvfrom error\n", argv[0]);
-                    exit (1);
-                    }
-                /* Make sure the message received is
-                * null terminated.
-                */
-                buffer[cc]='\0';
-                serverUDP (s_UDP, buffer, clientaddr_in);
+
+                //serverUDP (s_UDP, buffer, clientaddr_in);
+				serverUDPH (s_UDP, clientaddr_in);
                 }
           }
 		}   /* Fin del bucle infinito de atenci�n a clientes */
@@ -467,6 +459,40 @@ void errout(char *hostname)
  *	logging information to stdout.
  *
  */
+
+void serverUDPH(int sockfd, struct sockaddr_in client_addr) {
+    char buffer[TAM_BUFFER];
+	char * response = (char *)malloc(sizeof(char) * 100);
+	int estado = STATE_WAIT_HOLA;
+	int pregunta = 0;
+    while (1) {
+        socklen_t client_len = sizeof(client_addr);
+
+        // Receive a message from the client
+        ssize_t recv_len = recvfrom(sockfd, buffer, TAM_BUFFER, 0,
+                                    (struct sockaddr *)&client_addr, &client_len);
+
+        if (recv_len < 0) {
+            perror("Error in receiving message");
+            break;
+        }
+
+        buffer[recv_len] = '\0'; // Null-terminate the received data
+
+        printf("Received message from %s:%d: %s\n",
+               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), buffer);
+		
+
+		response = analizadorSintactico(buffer,&pregunta,&estado);
+
+		
+        // Process the received message (you can customize this part)
+        // Here, we simply echo back the received message to the client
+        sendto(sockfd, response, strlen(response), 0,
+               (const struct sockaddr *)&client_addr, client_len);
+    }
+}
+
 void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in)
 {
     struct in_addr reqaddr;	/* for requested host's address */
@@ -520,106 +546,87 @@ char *obtenerPreguntaAleatoria(int * pregunta)
 }
 
  //funcion para analizar la comunicacion cliente-servidor (ANALIZADOR SINTACTICO)
+char *analizadorSintactico(char *mensaje, int *pregunta, int *estado) {
+    char *respuesta = (char *)malloc(sizeof(char) * 100);
+    char *aux = (char *)malloc(sizeof(char) * 100);
 
- char * analizadorSintactico(char *mensaje, int * pregunta, int *estado)
- {
-	fflush(stdout);
-	char *respuesta = NULL;
-	char * aux = (char *)malloc(sizeof(char) * 100);
+    if (respuesta == NULL || aux == NULL) {
+        fprintf(stderr, "Error de reserva de memoria\n");
+        exit(EXIT_FAILURE);  // Termina el programa en caso de error grave de memoria
+    }
 
-	respuesta = (char *)malloc(sizeof(char) * 100);
+    char linea[100];  // Reserva espacio para almacenar la línea
+    strcpy(linea, mensaje);
+    printf("Mensaje: %s\n", linea);
 
-	char *linea;
-	strcpy(linea, mensaje);
-	
-	switch (*estado)
-	{
-		case STATE_WAIT_HOLA:
-			printf("Estado: STATE_WAIT_HOLA\n");
-			if(strcmp(linea, "HOLA\r\n") == 0)
-			{
-				aux = obtenerPreguntaAleatoria(pregunta);
-				strcpy(respuesta, aux);
-				*estado = STATE_JUGANDO;
-				printf("RespuestaAS:%s\n", respuesta);
-				return respuesta;
-			} 
-			else
-			{
-				*estado = STATE_WAIT_HOLA;
-				strcpy(respuesta, "S:500 Error de sintaxis");
-				printf("Respuesta:%s\n", respuesta);
-				return respuesta;
-			}
-			break;
-		case STATE_JUGANDO:
-			printf("Estado: STATE_JUGANDO\n");
-			if (strncmp(mensaje, "RESPUESTA", 9) == 0) 
-			{
-				printf("sintaxis ""RESPUESTA"" correcta\n");
-				int numero;
-				if (sscanf(mensaje + 10, "%d", &numero) == 1) 
-				{
-					printf("sintaxis ""RESPUESTA (n)"" correcta\n");
-					if (numero == respuestas[*pregunta]) 
-					{
-						*estado = STATE_WAIT_ADIOS;
-						strcpy(respuesta, "S:350 ACIERTO");
-						return respuesta;
-					} 
-					else 
-					{
-						//comparar si mayor o menor
-						if(numero > respuestas[*pregunta])
-						{
-							*estado = STATE_JUGANDO;
-							strcpy(respuesta, "S:354 MENOR");
-							return respuesta;
-						}
-						else
-						{
-							*estado = STATE_JUGANDO;
-							strcpy(respuesta, "S:354 MAYOR");
-							return respuesta;
-						}
-					}
-				} 
-				else 
-				{
-					*estado = STATE_JUGANDO;
-					strcpy(respuesta, "S:500 Error de sintaxis");
-					return respuesta;
-				}
-			}else
-			{
-				*estado = STATE_JUGANDO;
-				strcpy(respuesta, "S:500 Error de sintaxis");
-				return respuesta;
-			}
-			break;
-		case STATE_WAIT_ADIOS:
-			printf("Estado: STATE_WAIT_ADIOS\n");
-			if(strcmp(linea, "ADIOS\r\n") == 0)
-			{
-				strcpy(respuesta, "S:221 Cerrando el servicio");
-				*estado = STATE_DONE;
-				return respuesta;
-			} 
-			else if(strcmp(linea,"+\r\n") == 0)
-			{
-				*estado = STATE_JUGANDO;
-				aux = obtenerPreguntaAleatoria(pregunta);
-				strcpy(respuesta, aux);
-				return respuesta;
-			}
-			else
-			{
-				*estado = STATE_WAIT_ADIOS;
-				strcpy(respuesta, "S:500 Error de sintaxis");
-				return respuesta;
-			}
-			break;
-	}
+    switch (*estado) {
+        case STATE_WAIT_HOLA:
+            printf("Estado: STATE_WAIT_HOLA\n");
+            if (strcmp(linea, "HOLA\r\n") == 0) {
+                aux = obtenerPreguntaAleatoria(pregunta);
+                strcpy(respuesta, aux);
+                *estado = STATE_JUGANDO;
+                printf("RespuestaAS: %s\n", respuesta);
+                return respuesta;
+            } else {
+                *estado = STATE_WAIT_HOLA;
+                strcpy(respuesta, "S:500 Error de sintaxis");
+                printf("Respuesta: %s\n", respuesta);
+                return respuesta;
+            }
+            break;
+        case STATE_JUGANDO:
+            printf("Estado: STATE_JUGANDO\n");
+            if (strncmp(mensaje, "RESPUESTA", 9) == 0) {
+                printf("Sintaxis ""RESPUESTA"" correcta\n");
+                int numero;
+                if (sscanf(mensaje + 10, "%d", &numero) == 1) {
+                    printf("Sintaxis ""RESPUESTA (n)"" correcta\n");
+                    if (numero == respuestas[*pregunta]) {
+                        *estado = STATE_WAIT_ADIOS;
+                        strcpy(respuesta, "S:350 ACIERTO");
+                        return respuesta;
+                    } else {
+                        // Comparar si mayor o menor
+                        if (numero > respuestas[*pregunta]) {
+                            *estado = STATE_JUGANDO;
+                            strcpy(respuesta, "S:354 MENOR");
+                            return respuesta;
+                        } else {
+                            *estado = STATE_JUGANDO;
+                            strcpy(respuesta, "S:354 MAYOR");
+                            return respuesta;
+                        }
+                    }
+                } else {
+                    *estado = STATE_JUGANDO;
+                    strcpy(respuesta, "S:500 Error de sintaxis");
+                    return respuesta;
+                }
+            } else {
+                *estado = STATE_JUGANDO;
+                strcpy(respuesta, "S:500 Error de sintaxis");
+                return respuesta;
+            }
+            break;
+        case STATE_WAIT_ADIOS:
+            printf("Estado: STATE_WAIT_ADIOS\n");
+            if (strcmp(linea, "ADIOS\r\n") == 0) {
+                strcpy(respuesta, "S:221 Cerrando el servicio");
+                *estado = STATE_DONE;
+                return respuesta;
+            } else if (strcmp(linea, "+\r\n") == 0) {
+                *estado = STATE_JUGANDO;
+                aux = obtenerPreguntaAleatoria(pregunta);
+                strcpy(respuesta, aux);
+                return respuesta;
+            } else {
+                *estado = STATE_WAIT_ADIOS;
+                strcpy(respuesta, "S:500 Error de sintaxis");
+                return respuesta;
+            }
+            break;
+    }
 }
 
 
