@@ -675,12 +675,7 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado) {
                     strcpy(respuesta, "S:500 Error de sintaxis");
                     return respuesta;
                 }
-            } else if(mensaje, "ADIOS\r\n"){
-                strcpy(respuesta, "S:221 Cerrando el servicio");
-                *estado = STATE_DONE;
-                return respuesta;
-			}
-				else {
+            } else {
                 *estado = STATE_JUGANDO;
                 strcpy(respuesta, "S:500 Error de sintaxis");
                 return respuesta;
