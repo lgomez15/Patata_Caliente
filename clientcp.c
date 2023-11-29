@@ -131,7 +131,7 @@ char *argv[];
 	while(1)
 	{
 		//sent an user input to the server
-		printf("C: ");
+		printf("C:");
 		//read with fgets
 		fflush(stdin);
 		//strcpy(buf, "");
@@ -150,6 +150,9 @@ char *argv[];
 			exit(1);
 		}
 
+		//clean bufr before reading
+		strcpy(bufr, "");
+		//read the response from the server
 		while (i = recv(s, bufr, TAM_BUFFER, 0)) {
 			if (i == -1) 
 			{

@@ -26,36 +26,10 @@ void handler()
  printf("Alarma recibida \n");
 }
 
-char* readLineFromFile(FILE* file) {
-    char* line = NULL;
-    size_t lineLength = 0;
-    ssize_t bytesRead;
+void clientcp(char *server, char *protocol, char *filename);
+void clientudp(char *server, char *protocol, char *filename);
+char* readLineFromFile(FILE* file);
 
-    // Read a line from the file
-    bytesRead = getline(&line, &lineLength, file);
-
-    if (bytesRead == -1) {
-        // End of file or error occurred
-        free(line);
-        return NULL;
-    }
-
-    // Remove newline character, if present
-    if (bytesRead > 0 && line[bytesRead - 1] == '\n') {
-        line[bytesRead - 1] = '\0';
-    }
-
-    // Allocate memory for the line and copy it
-    char* result = (char*)malloc(strlen(line) + 1);
-    if (result == NULL) {
-        perror("Memory allocation failed");
-        free(line);
-        return NULL;
-    }
-    strcpy(result, line);
-
-    return result;
-}
 
 int main(int argc, char* argv[]) {
     // Check for the correct number of command-line arguments
@@ -69,26 +43,156 @@ int main(int argc, char* argv[]) {
     char* protocol = argv[2];
     char* filename = argv[3];
 
-    // Open the text file for reading
-    FILE* file = fopen(filename, "r");
-    if (file == NULL) {
-        perror("Unable to open the file");
-        return 1;
-    }
+    if (strcmp(protocol, "TCP") == 0) {
+		clientcp(server, protocol, filename);
+	} else if (strcmp(protocol, "UDP") == 0) {
+		clientudp(server, protocol, filename);
+	} else {
+		printf("Invalid protocol: %s\n", protocol);
+		return 1;
+	}
 
-    // Read lines from the file and process them
-    char* line;
-    while ((line = readLineFromFile(file)) != NULL) {
-        // Process each line as needed
-        printf("Server: %s, Protocol: %s, Line: %s\n", server, protocol, line);
+	return 0;
+}
 
-        // Free the memory allocated for the line
-        free(line);
-    }
+void clientcp(char *server, char *protocol, char *filename)
+{
+int s;				/* connected socket descriptor */
+   	struct addrinfo hints, *res;
+    long timevar;			/* contains time returned by time() */
+    struct sockaddr_in myaddr_in;	/* for local socket address */
+    struct sockaddr_in servaddr_in;	/* for server socket address */
+	int addrlen, i, j, errcode;
+    /* This example uses TAM_BUFFER byte messages. */
+	char buf[TAM_BUFFER];
+	char bufr[TAM_BUFFER];
 
-    // Close the file
-    fclose(file);
-    return 0;
+
+	/* Create the socket. */
+	s = socket (AF_INET, SOCK_STREAM, 0);
+	if (s == -1) {
+		printf("Error al crear el socket\n");
+		exit(1);
+	}
+	
+	/* clear out address structures */
+	memset ((char *)&myaddr_in, 0, sizeof(struct sockaddr_in));
+	memset ((char *)&servaddr_in, 0, sizeof(struct sockaddr_in));
+
+	/* Set up the peer address to which we will connect. */
+	servaddr_in.sin_family = AF_INET;
+	
+	/* Get the host information for the hostname that the
+	 * user passed in. */
+      memset (&hints, 0, sizeof (hints));
+      hints.ai_family = AF_INET;
+ 	 /* esta funci�n es la recomendada para la compatibilidad con IPv6 gethostbyname queda obsoleta*/
+    errcode = getaddrinfo (server, NULL, &hints, &res); 
+    if (errcode != 0){
+			/* Name was not found.  Return a
+			 * special value signifying the error. */
+		printf("No es posible resolver la IP de %s\n", server);
+		exit(1);
+        }
+    else {
+		/* Copy address of host */
+		servaddr_in.sin_addr = ((struct sockaddr_in *) res->ai_addr)->sin_addr;
+	    }
+    freeaddrinfo(res);
+
+    /* puerto del servidor en orden de red*/
+	servaddr_in.sin_port = htons(PUERTO);
+
+		/* Try to connect to the remote server at the address
+		 * which was just built into peeraddr.
+		 */
+	if (connect(s, (const struct sockaddr *)&servaddr_in, sizeof(struct sockaddr_in)) == -1) {
+		printf("Error al conectar con el servidor\n");
+		exit(1);
+	}
+		/* Since the connect call assigns a free address
+		 * to the local end of this connection, let's use
+		 * getsockname to see what it assigned.  Note that
+		 * addrlen needs to be passed in as a pointer,
+		 * because getsockname returns the actual length
+		 * of the address.
+		 */
+	addrlen = sizeof(struct sockaddr_in);
+	if (getsockname(s, (struct sockaddr *)&myaddr_in, &addrlen) == -1) {
+		printf("Error al leer la direccion del socket\n");
+		exit(1);
+	 }
+
+	/* Print out a startup message for the user. */
+	time(&timevar);
+	/* The port number must be converted first to host byte
+	 * order before printing.  On most hosts, this is not
+	 * necessary, but the ntohs() call is included here so
+	 * that this program could easily be ported to a host
+	 * that does require it.
+	 */
+	printf("Connected to %s on port %u at %s",
+			server, ntohs(myaddr_in.sin_port), (char *) ctime(&timevar));
+
+	
+	//leer el archivo
+	FILE *file = fopen(filename, "r");
+	if (file == NULL) {
+		printf("Error al abrir el archivo\n");
+		exit(1);
+	}
+
+	// Read lines from the file and process them
+	char* line;
+	while ((line = readLineFromFile(file)) != NULL) {
+			// Check if the buffer can hold the line plus "\r\n"
+		if (strlen(line) + 2 < TAM_BUFFER) { // +2 for "\r" and "\n"
+			// Copy line to buffer and add "\r\n"
+			strcpy(buf, line);
+			strcat(buf, "\r\n");
+		} else {
+			// Handle the error for buffer overflow
+			printf("Line too long for the buffer\n");
+			free(line); // Don't forget to free the memory
+			continue;   // Skip this line or handle the error as appropriate
+		}
+
+		printf("C:%s", buf);
+		//send the string to the server
+		if (send(s, buf, TAM_BUFFER, 0) != TAM_BUFFER) {
+			printf("Error al enviar el mensaje\n");
+			exit(1);
+		}
+
+		while (i = recv(s, bufr, TAM_BUFFER, 0)) {
+			if (i == -1) 
+			{
+				printf("Error al recibir la respuesta del servidor\n");
+				exit(1);
+			}
+
+			while (i < TAM_BUFFER) 
+			{
+				j = recv(s, &bufr[i], TAM_BUFFER-i, 0);
+				if (j == -1) {
+						printf("Error al recibir la respuesta del servidor\n");
+						exit(1);
+				}
+				i += j;
+			}
+			
+			break;
+		}
+
+		//checks is conexion is done
+		if (strcmp(bufr, "S:221 Cerrando el servicio") == 0) {
+			printf("Client requested to exit. Closing connection.\n");
+			return;
+		}
+
+		printf("%s\n", bufr);
+
+	}
 }
 
 void clientudp(char *server, char *protocol, char *filename)
@@ -194,13 +298,12 @@ void clientudp(char *server, char *protocol, char *filename)
 
 	//convert to buffer to string
 	buffer[strlen(buffer)] = '\0';
-	printf("Puerto del servidor: %s\n", buffer);
 
 	
 	//set server port 
 	servaddr_in.sin_port = htons(atoi(buffer));
 
-	printf("Puerto del servidor: %d\n", ntohs(servaddr_in.sin_port));
+
 
 	//clean buffer
 	memset(buffer, 0, TAM_BUFFER);
@@ -213,17 +316,31 @@ void clientudp(char *server, char *protocol, char *filename)
 	}
 
 	// Read lines from the file and process them
-	char* line;
-	while ((line = readLineFromFile(file)) != NULL) {
-		
-		//copy line to buffer
-		strcpy(buffer, line);
-		strcat(buffer, "\r\n");
+char* line;
+while ((line = readLineFromFile(file)) != NULL) {
+		// Check if the buffer can hold the line plus "\r\n"
+		if (strlen(line) + 2 < TAM_BUFFER) { // +2 for "\r" and "\n"
+			// Copy line to buffer and add "\r\n"
+			strcpy(buffer, line);
+			strcat(buffer, "\r\n");
+		} else {
+			// Handle the error for buffer overflow
+			printf("Line too long for the buffer\n");
+			free(line); // Don't forget to free the memory
+			continue;   // Skip this line or handle the error as appropriate
+		}
+
+		printf("C: %s", buffer);
+
+		// Debug: Print the buffer in hexadecimal to check its content
+		// for (int i = 0; buffer[i] != '\0'; i++) {
+		// 	printf("%02X ", (unsigned char)buffer[i]);
+		// }
+		// printf("\n");
 
 		//send message
 		if (sendto(s, buffer, strlen(buffer), 0, (struct sockaddr *) &servaddr_in, sizeof(struct sockaddr_in)) == -1) {
-			perror(argv[0]);
-			fprintf(stderr, "%s: unable to send message\n", argv[0]);
+			printf("Error al enviar el mensaje\n");
 			exit(1);
 		}
 
@@ -241,8 +358,7 @@ void clientudp(char *server, char *protocol, char *filename)
 					printf("%s\n", bufResp);
 					fflush(stdout);
 				} else {
-					perror(argv[0]);
-					fprintf(stderr, "%s: unable to receive message\n", argv[0]);
+					printf("Error al recibir la respuesta del servidor\n");
 					exit(1);
 				}
 			} else {
@@ -262,4 +378,39 @@ void clientudp(char *server, char *protocol, char *filename)
 			printf("No response from server\n");
 		}
 	}
+}
+
+char* readLineFromFile(FILE* file) {
+    char* line = NULL;
+    size_t lineLength = 0;
+    ssize_t bytesRead;
+
+    // Read a line from the file
+    bytesRead = getline(&line, &lineLength, file);
+
+    if (bytesRead == -1) {
+        // End of file or error occurred
+        free(line);
+        return NULL;
+    }
+
+    // Remove any existing CR (Carriage Return) and LF (Line Feed) characters from the end of the line
+    while (bytesRead > 0 && (line[bytesRead - 1] == '\n' || line[bytesRead - 1] == '\r')) {
+        --bytesRead;  // Reduce the count of bytes read
+        line[bytesRead] = '\0';  // Set the end of the string before CR or LF
+    }
+
+    // Allocate memory for the line and copy it
+    char* result = (char*)malloc(strlen(line) + 1);
+    if (result == NULL) {
+        perror("Memory allocation failed");
+        free(line);
+        return NULL;
+    }
+    strcpy(result, line);
+
+    // Don't forget to free the original line buffer
+    free(line);
+
+    return result;
 }

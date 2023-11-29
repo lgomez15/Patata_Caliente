@@ -649,6 +649,14 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado) {
             break;
         case STATE_JUGANDO:
             printf("Estado: STATE_JUGANDO\n");
+
+			//comparar con ADIOS 
+			if (strcmp(linea, "ADIOS\r\n") == 0) {
+				strcpy(respuesta, "S:221 Cerrando el servicio");
+				*estado = STATE_DONE;
+				return respuesta;
+			}
+
             if (strncmp(mensaje, "RESPUESTA", 9) == 0) {
                 printf("Sintaxis ""RESPUESTA"" correcta\n");
                 int numero;
