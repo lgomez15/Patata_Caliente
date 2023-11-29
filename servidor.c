@@ -1,5 +1,5 @@
 /*
- *          		S E R V I D O R
+ *          		S E R V I D O R Y8322603K
  *
  *	This is an example program that demonstrates the use of
  *	sockets TCP and UDP as an IPC mechanism.  
@@ -82,7 +82,7 @@ char *obtenerPreguntaAleatoria(int * pregunta);
 char * analizadorSintactico(char *mensaje, int * pregunta, int *estado);
 char* obtenerPregunta();
 void serverTCP(int s, struct sockaddr_in peeraddr_in);
-void serverUDPH(int s, struct sockaddr_in clientaddr_in);
+void serverUDPH(int s, struct sockaddr_in clientaddr_in, socklen_t client_len);
 void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in);
 void errout(char *);		/* declare error out routine */
 
@@ -292,8 +292,78 @@ char *argv[];
                 * for a null character.
                 */
 
-                //serverUDP (s_UDP, buffer, clientaddr_in);
-				serverUDPH (s_UDP, clientaddr_in);
+                //fork for UDP
+				switch (fork()) {
+					case -1:	/* Can't fork, just exit. */
+						exit(1);
+					case 0:	{	/* Child process comes here. */
+
+						//get client address in clientaddr_in
+						struct sockaddr_in clientaddr_in;
+						socklen_t addrlen = sizeof(struct sockaddr_in);
+						int nc = recvfrom(s_UDP, buffer, TAM_BUFFER, 0,
+							(struct sockaddr *)&clientaddr_in, &addrlen);
+						if (nc == -1) {
+							perror("recvfrom");
+							exit(1);
+						}
+
+						//close UDP socket inherited from the daemon
+						close(s_UDP);
+
+						//efimeral port for each client
+						int s_UDP_child = socket(AF_INET, SOCK_DGRAM, 0);
+						if (s_UDP_child == -1) {
+							perror("unable to create socket UDP child");
+							exit(1);
+						}
+
+						/* Enlazar la dirección del hijo al socket con un puerto efímero */
+						struct sockaddr_in myaddr_in_child;
+						memset((char *)&myaddr_in_child, 0, sizeof(struct sockaddr_in));
+						myaddr_in_child.sin_family = AF_INET;
+						myaddr_in_child.sin_addr.s_addr = INADDR_ANY;
+						myaddr_in_child.sin_port = 0;
+
+						if (bind(s_UDP_child, (struct sockaddr *) &myaddr_in_child, sizeof(struct sockaddr_in)) == -1) {
+							perror("bind UDP child");
+							exit(1);
+						}
+
+						/* Obtener el puerto efímero que fue elegido */
+						socklen_t len = sizeof(myaddr_in_child);
+						if (getsockname(s_UDP_child, (struct sockaddr *)&myaddr_in_child, &len) == -1) {
+							perror("getsockname");
+							exit(1);
+						}
+						printf("El sistema operativo eligió el puerto efímero: %d\n", ntohs(myaddr_in_child.sin_port));
+
+						//string to send port 
+						char port[10];
+						sprintf(port, "%d", ntohs(myaddr_in_child.sin_port));
+						
+						//send port to client
+						int nc2 = sendto(s_UDP_child, port, strlen(port), 0,
+							(struct sockaddr *)&clientaddr_in, addrlen);
+
+						serverUDPH(s_UDP_child,clientaddr_in,addrlen);
+						//close UDP socket child
+						close(s_UDP_child);
+						exit(0);
+					}
+					default:	/* Daemon process comes here. */
+							/* The daemon needs to remember
+							 * to close the new accept socket
+							 * after forking the child.  This
+							 * prevents the daemon from running
+							 * out of file descriptor space.  It
+							 * also means that when the server
+							 * closes the socket, that it will
+							 * allow the socket to be destroyed
+							 * since it will be the last close.
+							 */
+							break;
+					}
                 }
           }
 		}   /* Fin del bucle infinito de atenci�n a clientes */
@@ -460,17 +530,17 @@ void errout(char *hostname)
  *
  */
 
-void serverUDPH(int sockfd, struct sockaddr_in client_addr) {
+void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len) {
     char buffer[TAM_BUFFER];
 	char * response = (char *)malloc(sizeof(char) * 100);
 	int estado = STATE_WAIT_HOLA;
 	int pregunta = 0;
-    while (1) {
-        socklen_t client_len = sizeof(client_addr);
+	printf("Entrando en el analizador\n");
+    while (estado != STATE_DONE) {
 
         // Receive a message from the client
-        ssize_t recv_len = recvfrom(sockfd, buffer, TAM_BUFFER, 0,
-                                    (struct sockaddr *)&client_addr, &client_len);
+		printf("Esperando mensaje del cliente\n");
+        ssize_t recv_len = recvfrom(sockfd, buffer, TAM_BUFFER, 0, (struct sockaddr *)&client_addr, &client_len);
 
         if (recv_len < 0) {
             perror("Error in receiving message");
@@ -491,6 +561,8 @@ void serverUDPH(int sockfd, struct sockaddr_in client_addr) {
         sendto(sockfd, response, strlen(response), 0,
                (const struct sockaddr *)&client_addr, client_len);
     }
+	
+	return;
 }
 
 void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in)

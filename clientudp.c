@@ -75,6 +75,7 @@ char *argv[];
     int	addrlen, n_retry;
     struct sigaction vec;
    	char buffer[TAM_BUFFER];
+	char bufResp[TAM_BUFFER];
    	struct addrinfo hints, *res;
 
 	if (argc != 3) {
@@ -160,10 +161,41 @@ char *argv[];
             exit(1);
     }
 
+	//send the name of the client
+	if (sendto(s, argv[2], strlen(argv[2]), 0, (struct sockaddr *) &servaddr_in, sizeof(struct sockaddr_in)) == -1) {
+		perror(argv[0]);
+		fprintf(stderr, "%s: unable to send message\n", argv[0]);
+		exit(1);
+	}
+
+	//wait for server to send the port 
+	if (recvfrom(s, buffer, TAM_BUFFER, 0, (struct sockaddr *) &servaddr_in, &addrlen) == -1) {
+		perror(argv[0]);
+		fprintf(stderr, "%s: unable to receive message\n", argv[0]);
+		exit(1);
+	}
+
+	//convert to buffer to string
+	buffer[strlen(buffer)] = '\0';
+	printf("Puerto del servidor: %s\n", buffer);
+
+	
+	//set server port 
+	servaddr_in.sin_port = htons(atoi(buffer));
+
+	printf("Puerto del servidor: %d\n", ntohs(servaddr_in.sin_port));
+
+	//clean buffer
+	memset(buffer, 0, TAM_BUFFER);
+
+
 	while (1)
 	{
 		// Send a message to the server
 		fflush(stdout);
+		
+		//clean buffer
+		memset(buffer, 0, TAM_BUFFER);
 		printf("C:");
 		fgets(buffer, TAM_BUFFER, stdin);
 
@@ -172,20 +204,25 @@ char *argv[];
 		//add \r\n
 		strcat(buffer, "\r\n");
 
+		//send message
 		if (sendto(s, buffer, strlen(buffer), 0, (struct sockaddr *) &servaddr_in, sizeof(struct sockaddr_in)) == -1) {
 			perror(argv[0]);
 			fprintf(stderr, "%s: unable to send message\n", argv[0]);
 			exit(1);
 		}
 
+
 		// Wait for a reply
+		//clean bufResp
+		memset(bufResp, 0, TAM_BUFFER);
+
 		n_retry = 0;
 		do {
 			alarm(TIMEOUT);
-			if (recvfrom(s, buffer, TAM_BUFFER, 0, (struct sockaddr *) &servaddr_in, &addrlen) == -1) {
+			if (recvfrom(s, bufResp, TAM_BUFFER, 0, (struct sockaddr *) &servaddr_in, &addrlen) == -1) {
 				if (errno == EINTR) {
 					n_retry++;
-					printf("%s\n", buffer);
+					printf("%s\n", bufResp);
 					fflush(stdout);
 				} else {
 					perror(argv[0]);
@@ -199,12 +236,12 @@ char *argv[];
 
 		if (n_retry == 0) {
 			alarm(0);
-			if(strcmp(buffer, "S:221 Cerrando el servicio") == 0)
+			if(strcmp(bufResp, "S:221 Cerrando el servicio") == 0)
 				{
-					printf("%s\n", buffer);
+					printf("%s\n", bufResp);
 					exit(0);
 				}
-			printf("%s\n", buffer);
+			printf("%s\n", bufResp);
 		} else {
 			printf("No response from server\n");
 		}
