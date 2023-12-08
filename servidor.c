@@ -17,9 +17,16 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <semaphore.h>
+#include <pthread.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/wait.h>
 
-
-
+#define SEM_NAME "/sem_log"
 #define PUERTO 22603
 #define ADDRNOTFOUND	0xffffffff	/* return address for unfound host */
 #define BUFFERSIZE	1024	/* maximum size of packets to be received */
@@ -67,6 +74,14 @@ int respuestas[] = {
 	3,
 };
 
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+    struct seminfo *__buf;
+};
+
+
 extern int errno;
 
 /*
@@ -79,10 +94,10 @@ extern int errno;
  *
  */
 char *obtenerPreguntaAleatoria(int * pregunta);
-char * analizadorSintactico(char *mensaje, int * pregunta, int *estado);
+char * analizadorSintactico(char *mensaje, int * pregunta, int *estado, int *intentos);
 char* obtenerPregunta();
-void serverTCP(int s, struct sockaddr_in peeraddr_in);
-void serverUDPH(int s, struct sockaddr_in clientaddr_in, socklen_t client_len);
+void serverTCP(int s, struct sockaddr_in peeraddr_in,int sem_id, struct sembuf sb);
+void serverUDPH(int s, struct sockaddr_in clientaddr_in, socklen_t client_len, int sem_id, struct sembuf sb);
 void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in);
 void errout(char *);		/* declare error out routine */
 
@@ -93,6 +108,12 @@ int main(argc, argv)
 int argc;
 char *argv[];
 {
+
+	key_t key;
+    int sem_id;
+    struct sembuf sb;
+    union semun sem_union;
+    pid_t pid;
 
     int s_TCP, s_UDP;		/* connected socket descriptor */
     int ls_TCP;				/* listen socket descriptor */
@@ -111,6 +132,33 @@ char *argv[];
     char buffer[BUFFERSIZE];	/* buffer for packets to be read into */
     
     struct sigaction vec;
+
+	// Obtener clave para semáforo
+    key = ftok("/bin/ls", 33);
+    if (key == -1) {
+        perror("ftok");
+        exit(EXIT_FAILURE);
+    }
+
+    // Crear semáforo
+    sem_id = semget(key, 1, 0600 | IPC_CREAT);
+    if (sem_id == -1) {
+        perror("semget");
+        exit(EXIT_FAILURE);
+    }
+
+    // Inicializar semáforo
+    sem_union.val = 1;
+    if (semctl(sem_id, 0, SETVAL, sem_union) == -1) {
+        perror("semctl");
+        exit(EXIT_FAILURE);
+    }
+
+	// Operaciones en el semáforo
+	sb.sem_num = 0;
+	sb.sem_op = -1;  // Esperar semáforo
+	sb.sem_flg = 0;
+
 
 		/* Create the listen socket. */
 	ls_TCP = socket (AF_INET, SOCK_STREAM, 0);
@@ -204,6 +252,10 @@ char *argv[];
 		fclose(stdin);
 		fclose(stderr);
 
+		
+
+
+
 			/* Set SIGCLD to SIG_IGN, in order to prevent
 			 * the accumulation of zombies as each child
 			 * terminates.  This means the daemon does not
@@ -265,7 +317,7 @@ char *argv[];
         				exit(1);
         			case 0:		/* Child process comes here. */
                     			close(ls_TCP); /* Close the listen socket inherited from the daemon. */
-        				serverTCP(s_TCP, clientaddr_in);
+        				serverTCP(s_TCP, clientaddr_in,sem_id,sb);
         				exit(0);
         			default:	/* Daemon process comes here. */
         					/* The daemon needs to remember
@@ -346,7 +398,7 @@ char *argv[];
 						int nc2 = sendto(s_UDP_child, port, strlen(port), 0,
 							(struct sockaddr *)&clientaddr_in, addrlen);
 
-						serverUDPH(s_UDP_child,clientaddr_in,addrlen);
+						serverUDPH(s_UDP_child,clientaddr_in,addrlen,sem_id,sb);
 						//close UDP socket child
 						close(s_UDP_child);
 						exit(0);
@@ -389,8 +441,11 @@ char *argv[];
  *	logging information to stdout.
  *
  */
-void serverTCP(int s, struct sockaddr_in clientaddr_in)
+void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf sb)
 {
+	FILE *file;
+	int intentos = 4;
+	char txt[TAM_BUFFER];
 	int reqcnt = 0;		/* keeps count of number of requests */
 	char buf[TAM_BUFFER];		/* This example uses TAM_BUFFER byte messages. */
 	char hostname[MAXHOST];		/* remote host's name string */
@@ -401,57 +456,48 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in)
     
     struct linger linger;		/* allow a lingering, graceful close; */
     				            /* used when setting SO_LINGER */
-    				
-	/* Look up the host information for the remote host
-	 * that we have connected with.  Its internet address
-	 * was returned by the accept call, in the main
-	 * daemon loop above.
-	 */
 	 
      status = getnameinfo((struct sockaddr *)&clientaddr_in,sizeof(clientaddr_in),
                            hostname,MAXHOST,NULL,0,0);
      if(status){
-           	/* The information is unavailable for the remote
-			 * host.  Just format its internet address to be
-			 * printed out in the logging information.  The
-			 * address will be shown in "internet dot format".
-			 */
-			 /* inet_ntop para interoperatividad con IPv6 */
+
             if (inet_ntop(AF_INET, &(clientaddr_in.sin_addr), hostname, MAXHOST) == NULL)
             	perror(" inet_ntop \n");
              }
     /* Log a startup message. */
     time (&timevar);
-		/* The port number must be converted first to host byte
-		 * order before printing.  On most hosts, this is not
-		 * necessary, but the ntohs() call is included here so
-		 * that this program could easily be ported to a host
-		 * that does require it.
-		 */
+
 	printf("Startup from %s port %u at %s",
 		hostname, ntohs(clientaddr_in.sin_port), (char *) ctime(&timevar));
 
-		/* Set the socket for a lingering, graceful close.
-		 * This will cause a final close of this socket to wait until all of the
-		 * data sent on it has been received by the remote host.
-		 */
+
+		
+		/*Semaforo para escribir entrada del cliente*/
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:TCP IP: %s PUERTO: %u HORA: %s", hostname, ntohs(clientaddr_in.sin_port),(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+
+        file = fopen("log.txt", "a");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(file, txt, getpid());
+        fclose(file);
+
+        sb.sem_op = 1;  // Liberar semáforo
+        semop(sem_id, &sb, 1);
+		//clear txt variable
+		memset(txt, 0, sizeof(txt));
+		/*Semaforo para escribir entrada del cliente*/
+
+
 	linger.l_onoff  =1;
 	linger.l_linger =1;
 	if (setsockopt(s, SOL_SOCKET, SO_LINGER, &linger,
 					sizeof(linger)) == -1) {
 		errout(hostname);
 	}
-
-		/* Go into a loop, receiving requests from the remote
-		 * client.  After the client has sent the last request,
-		 * it will do a shutdown for sending, which will cause
-		 * an end-of-file condition to appear on this end of the
-		 * connection.  After all of the client's requests have
-		 * been received, the next recv call will return zero
-		 * bytes, signalling an end-of-file condition.  This is
-		 * how the server will know that no more requests will
-		 * follow, and the loop will be exited.
-		 */
 
 	int estado = STATE_WAIT_HOLA;
 	int pregunta = 0;
@@ -461,40 +507,58 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in)
 	char * response = NULL;
 		printf("Received request number %d with length: %d and string %s\n", reqcnt, len, buf);
 
-		// while ((buf[len-1] != '\n' && buf[len-2] != '\r') {
-		// 	len1 = recv(s, &buf[len], TAM_BUFFER-len, 0);
-		// 	if (len1 == -1) errout(hostname);
-		// 	len += len1;
-		// }
-
 		strcpy(request,buf);
 		printf("Request content:%s", request);
-		
-		
-		response = analizadorSintactico(request,&pregunta,&estado);
+
+		response = analizadorSintactico(request,&pregunta,&estado,&intentos);
 		printf("\nRespuesta:%s", response);
+
+		/*Semaforo para escribir REQUEST del cliente*/
+		//takeout /n from request
+		request[strlen(request)-2] = '\0';
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:TCP IP_DESTINO: %s PUERTO: %u REQUEST: %s HORA: %s", hostname, ntohs(clientaddr_in.sin_port),request,(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+		file = fopen("log.txt", "a");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(file, txt, getpid());
+        fclose(file);
+
+        sb.sem_op = 1;  // Liberar semáforo
+        semop(sem_id, &sb, 1);
+		memset(txt, 0, sizeof(txt));
+		/* FIN Semaforo para escribir REQUEST del cliente*/
 		
 		/* Increment the request count. */
 		reqcnt++;
 		
-		sleep(1);
-
 		/* Send a response back to the client. */
 		if (send(s, response, TAM_BUFFER, 0) != TAM_BUFFER) errout(hostname);
 		printf("\nSent response number %d currentSTATE: %d", reqcnt,estado);
 		printf("\nResponse: %s", response);
-	}
 
-		/* The loop has terminated, because there are no
-		 * more requests to be serviced.  As mentioned above,
-		 * this close will block until all of the sent replies
-		 * have been received by the remote host.  The reason
-		 * for lingering on the close is so that the server will
-		 * have a better idea of when the remote has picked up
-		 * all of the data.  This will allow the start and finish
-		 * times printed in the log file to reflect more accurately
-		 * the length of time this connection was used.
-		 */
+		/*Semaforo para escribir RESPONSE del cliente*/
+		//takeout /n from response
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:TCP IP_DESTINO: %s PUERTO: %u RESPUESTA: %s HORA: %s", hostname, ntohs(clientaddr_in.sin_port),response,(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+		file = fopen("log.txt", "a");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(file, txt, getpid());
+        fclose(file);
+
+        sb.sem_op = 1;  // Liberar semáforo
+        semop(sem_id, &sb, 1);
+		memset(txt, 0, sizeof(txt));
+		/*FIN Semaforo para escribir RESPONSE del cliente*/
+	}
+		/* Close the socket. */
 	close(s);
 
 		/* Log a finishing message. */
@@ -530,12 +594,37 @@ void errout(char *hostname)
  *
  */
 
-void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len) {
+void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len, int sem_id, struct sembuf sb) {
+	FILE *file;
+	char txt[1000];
     char buffer[TAM_BUFFER];
 	char * response = (char *)malloc(sizeof(char) * 100);
 	int estado = STATE_WAIT_HOLA;
 	int pregunta = 0;
+	long timevar;
+	int intentos = 4;
 	printf("Entrando en el analizador\n");
+
+		
+		/*Semaforo para escribir entrada del cliente*/
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:UDP IP:%s PUERTO:%u HORA:%s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+
+        file = fopen("log.txt", "a");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(file, txt, getpid());
+        fclose(file);
+
+        sb.sem_op = 1;  // Liberar semáforo
+        semop(sem_id, &sb, 1);
+		//clear txt variable
+		memset(txt, 0, sizeof(txt));
+		/*Semaforo para escribir entrada del cliente*/
+
     while (estado != STATE_DONE) {
 
         // Receive a message from the client
@@ -553,13 +642,59 @@ void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len
                inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), buffer);
 		
 
-		response = analizadorSintactico(buffer,&pregunta,&estado);
+		response = analizadorSintactico(buffer,&pregunta,&estado,&intentos);
 
-		
+		/*Semaforo para escribir entrada del cliente*/
+		//takeout /n from request
+		buffer[strlen(buffer)-2] = '\0';
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:UDP IP_DESTINO:%s PUERTO:%u REQUEST:%s HORA:%s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),buffer,(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+
+        file = fopen("log.txt", "a");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+        fprintf(file, txt, getpid());
+        fclose(file);
+
+        sb.sem_op = 1;  // Liberar semáforo
+        semop(sem_id, &sb, 1);
+		//clear txt variable
+		memset(txt, 0, sizeof(txt));
+		/*Semaforo para escribir entrada del cliente*/
+
+		//clean buffer
+		memset(buffer, 0, sizeof(buffer));
+
         // Process the received message (you can customize this part)
         // Here, we simply echo back the received message to the client
         sendto(sockfd, response, strlen(response), 0,
                (const struct sockaddr *)&client_addr, client_len);
+
+		/*Semaforo para escribir entrada del cliente*/
+		//takeout /n from response
+		//copy time ClientIP and port to txt variable
+		sprintf(txt,"PROTOCOLO:UDP IP_DESTINO:%s PUERTO:%u RESPUESTA:%s HORA:%s", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),response,(char *) ctime(&timevar));
+		semop(sem_id, &sb, 1);  // Esperar semáforo
+
+		file = fopen("log.txt", "a");
+		if (file == NULL) {
+			perror("fopen");
+			exit(EXIT_FAILURE);
+		}
+		fprintf(file, txt, getpid());
+		fclose(file);
+
+		sb.sem_op = 1;  // Liberar semáforo
+		semop(sem_id, &sb, 1);
+		//clear txt variable
+		memset(txt, 0, sizeof(txt));
+		/*Semaforo para escribir entrada del cliente*/
+
+		//clean response
+		memset(response, 0, sizeof(response));
     }
 	
 	return;
@@ -618,7 +753,7 @@ char *obtenerPreguntaAleatoria(int * pregunta)
 }
 
  //funcion para analizar la comunicacion cliente-servidor (ANALIZADOR SINTACTICO)
-char *analizadorSintactico(char *mensaje, int *pregunta, int *estado) {
+char *analizadorSintactico(char *mensaje, int *pregunta, int *estado, int *intentos) {
     char *respuesta = (char *)malloc(sizeof(char) * 100);
     char *aux = (char *)malloc(sizeof(char) * 100);
 
@@ -667,14 +802,21 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado) {
                         strcpy(respuesta, "S:350 ACIERTO");
                         return respuesta;
                     } else {
+						*intentos = *intentos - 1;
+						if(*intentos == 0){
+							*estado = STATE_WAIT_ADIOS;
+							strcpy(respuesta, "S:375 FALLO");
+							return respuesta;
+						}
                         // Comparar si mayor o menor
                         if (numero > respuestas[*pregunta]) {
                             *estado = STATE_JUGANDO;
-                            strcpy(respuesta, "S:354 MENOR");
+							//create response with number of attempts
+							sprintf(respuesta, "S:354 MENOR#%d", *intentos);
                             return respuesta;
                         } else {
                             *estado = STATE_JUGANDO;
-                            strcpy(respuesta, "S:354 MAYOR");
+							sprintf(respuesta, "S:354 MAYOR#%d", *intentos);
                             return respuesta;
                         }
                     }
