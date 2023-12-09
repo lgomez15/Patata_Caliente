@@ -110,13 +110,7 @@ int s;				/* connected socket descriptor */
 		printf("Error al conectar con el servidor\n");
 		exit(1);
 	}
-		/* Since the connect call assigns a free address
-		 * to the local end of this connection, let's use
-		 * getsockname to see what it assigned.  Note that
-		 * addrlen needs to be passed in as a pointer,
-		 * because getsockname returns the actual length
-		 * of the address.
-		 */
+
 	addrlen = sizeof(struct sockaddr_in);
 	if (getsockname(s, (struct sockaddr *)&myaddr_in, &addrlen) == -1) {
 		printf("Error al leer la direccion del socket\n");
@@ -125,16 +119,7 @@ int s;				/* connected socket descriptor */
 
 	/* Print out a startup message for the user. */
 	time(&timevar);
-	/* The port number must be converted first to host byte
-	 * order before printing.  On most hosts, this is not
-	 * necessary, but the ntohs() call is included here so
-	 * that this program could easily be ported to a host
-	 * that does require it.
-	 */
-	printf("Connected to %s on port %u at %s",
-			server, ntohs(myaddr_in.sin_port), (char *) ctime(&timevar));
 
-	
 	//leer el archivo
 	FILE *file = fopen(filename, "r");
 	if (file == NULL) {
@@ -157,7 +142,6 @@ int s;				/* connected socket descriptor */
 			continue;   // Skip this line or handle the error as appropriate
 		}
 
-		printf("C:%s", buf);
 		//send the string to the server
 		if (send(s, buf, TAM_BUFFER, 0) != TAM_BUFFER) {
 			printf("Error al enviar el mensaje\n");
@@ -190,7 +174,6 @@ int s;				/* connected socket descriptor */
 			return;
 		}
 
-		printf("%s\n", bufr);
 
 	}
 }
@@ -211,7 +194,6 @@ void clientudp(char *server, char *protocol, char *filename)
    	struct addrinfo hints, *res;
 
 
-	// Extract the command-line arguments
 
 		/* Create the socket. */
 	s = socket (AF_INET, SOCK_DGRAM, 0);
@@ -223,14 +205,7 @@ void clientudp(char *server, char *protocol, char *filename)
     /* clear out address structures */
 	memset ((char *)&myaddr_in, 0, sizeof(struct sockaddr_in));
 	memset ((char *)&servaddr_in, 0, sizeof(struct sockaddr_in));
-	
-			/* Bind socket to some local address so that the
-		 * server can send the reply back.  A port number
-		 * of zero will be used so that the system will
-		 * assign any available port number.  An address
-		 * of INADDR_ANY will be used so we do not have to
-		 * look up the internet address of the local host.
-		 */
+
 	myaddr_in.sin_family = AF_INET;
 	myaddr_in.sin_port = 0;
 	myaddr_in.sin_addr.s_addr = INADDR_ANY;
@@ -244,15 +219,8 @@ void clientudp(char *server, char *protocol, char *filename)
             exit(1);
     }
 
-            /* Print out a startup message for the user. */
     time(&timevar);
-            /* The port number must be converted first to host byte
-             * order before printing.  On most hosts, this is not
-             * necessary, but the ntohs() call is included here so
-             * that this program could easily be ported to a host
-             * that does require it.
-             */
-    printf("Cliente UDP iniciado en el puerto %d\n", ntohs(myaddr_in.sin_port));
+
 
 	/* Set up the server address. */
 	servaddr_in.sin_family = AF_INET;
@@ -330,14 +298,6 @@ while ((line = readLineFromFile(file)) != NULL) {
 			continue;   // Skip this line or handle the error as appropriate
 		}
 
-		printf("C: %s", buffer);
-
-		// Debug: Print the buffer in hexadecimal to check its content
-		// for (int i = 0; buffer[i] != '\0'; i++) {
-		// 	printf("%02X ", (unsigned char)buffer[i]);
-		// }
-		// printf("\n");
-
 		//send message
 		if (sendto(s, buffer, strlen(buffer), 0, (struct sockaddr *) &servaddr_in, sizeof(struct sockaddr_in)) == -1) {
 			printf("Error al enviar el mensaje\n");
@@ -355,7 +315,6 @@ while ((line = readLineFromFile(file)) != NULL) {
 			if (recvfrom(s, bufResp, TAM_BUFFER, 0, (struct sockaddr *) &servaddr_in, &addrlen) == -1) {
 				if (errno == EINTR) {
 					n_retry++;
-					printf("%s\n", bufResp);
 					fflush(stdout);
 				} else {
 					printf("Error al recibir la respuesta del servidor\n");
@@ -370,10 +329,8 @@ while ((line = readLineFromFile(file)) != NULL) {
 			alarm(0);
 			if(strcmp(bufResp, "S:221 Cerrando el servicio") == 0)
 				{
-					printf("%s\n", bufResp);
 					exit(0);
 				}
-			printf("%s\n", bufResp);
 		} else {
 			printf("No response from server\n");
 		}
@@ -409,7 +366,6 @@ char* readLineFromFile(FILE* file) {
     }
     strcpy(result, line);
 
-    // Don't forget to free the original line buffer
     free(line);
 
     return result;

@@ -388,7 +388,6 @@ char *argv[];
 							perror("getsockname");
 							exit(1);
 						}
-						printf("El sistema operativo eligió el puerto efímero: %d\n", ntohs(myaddr_in_child.sin_port));
 
 						//string to send port 
 						char port[10];
@@ -467,11 +466,6 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf
     /* Log a startup message. */
     time (&timevar);
 
-	printf("Startup from %s port %u at %s",
-		hostname, ntohs(clientaddr_in.sin_port), (char *) ctime(&timevar));
-
-
-		
 		/*Semaforo para escribir entrada del cliente*/
 		//copy time ClientIP and port to txt variable
 		sprintf(txt,"PROTOCOLO:TCP IP: %s PUERTO: %u HORA: %s", hostname, ntohs(clientaddr_in.sin_port),(char *) ctime(&timevar));
@@ -505,13 +499,10 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf
 		if (len == -1) errout(hostname); 
 		char * request = (char *)malloc(sizeof(char) * 100);
 	char * response = NULL;
-		printf("Received request number %d with length: %d and string %s\n", reqcnt, len, buf);
 
 		strcpy(request,buf);
-		printf("Request content:%s", request);
 
 		response = analizadorSintactico(request,&pregunta,&estado,&intentos);
-		printf("\nRespuesta:%s", response);
 
 		/*Semaforo para escribir REQUEST del cliente*/
 		//takeout /n from request
@@ -537,8 +528,6 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf
 		
 		/* Send a response back to the client. */
 		if (send(s, response, TAM_BUFFER, 0) != TAM_BUFFER) errout(hostname);
-		printf("\nSent response number %d currentSTATE: %d", reqcnt,estado);
-		printf("\nResponse: %s", response);
 
 		/*Semaforo para escribir RESPONSE del cliente*/
 		//takeout /n from response
@@ -569,8 +558,6 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf
 		 * that this program could easily be ported to a host
 		 * that does require it.
 		 */
-	printf("Completed %s port %u, %d requests, at %s\n",
-		hostname, ntohs(clientaddr_in.sin_port), reqcnt, (char *) ctime(&timevar));
 }
 
 /*
@@ -578,7 +565,6 @@ void serverTCP(int s, struct sockaddr_in clientaddr_in,int sem_id, struct sembuf
  */
 void errout(char *hostname)
 {
-	printf("Connection with %s aborted on error\n", hostname);
 	exit(1);     
 }
 
@@ -603,7 +589,6 @@ void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len
 	int pregunta = 0;
 	long timevar;
 	int intentos = 4;
-	printf("Entrando en el analizador\n");
 
 		
 		/*Semaforo para escribir entrada del cliente*/
@@ -628,7 +613,6 @@ void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len
     while (estado != STATE_DONE) {
 
         // Receive a message from the client
-		printf("Esperando mensaje del cliente\n");
         ssize_t recv_len = recvfrom(sockfd, buffer, TAM_BUFFER, 0, (struct sockaddr *)&client_addr, &client_len);
 
         if (recv_len < 0) {
@@ -638,8 +622,6 @@ void serverUDPH(int sockfd, struct sockaddr_in client_addr, socklen_t client_len
 
         buffer[recv_len] = '\0'; // Null-terminate the received data
 
-        printf("Received message from %s:%d: %s\n",
-               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), buffer);
 		
 
 		response = analizadorSintactico(buffer,&pregunta,&estado,&intentos);
@@ -732,7 +714,6 @@ void serverUDP(int s, char * buffer, struct sockaddr_in clientaddr_in)
 			0, (struct sockaddr *)&clientaddr_in, addrlen);
 	if ( nc == -1) {
          perror("serverUDP");
-         printf("%s: sendto error\n", "serverUDP");
          return;
          }   
  }
@@ -764,26 +745,21 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado, int *inten
 
     char linea[100];  // Reserva espacio para almacenar la línea
     strcpy(linea, mensaje);
-    printf("Mensaje: %s\n", linea);
 
     switch (*estado) {
         case STATE_WAIT_HOLA:
-            printf("Estado: STATE_WAIT_HOLA\n");
             if (strcmp(linea, "HOLA\r\n") == 0) {
                 aux = obtenerPreguntaAleatoria(pregunta);
                 strcpy(respuesta, aux);
                 *estado = STATE_JUGANDO;
-                printf("RespuestaAS: %s\n", respuesta);
                 return respuesta;
             } else {
                 *estado = STATE_WAIT_HOLA;
                 strcpy(respuesta, "S:500 Error de sintaxis");
-                printf("Respuesta: %s\n", respuesta);
                 return respuesta;
             }
             break;
         case STATE_JUGANDO:
-            printf("Estado: STATE_JUGANDO\n");
 
 			//comparar con ADIOS 
 			if (strcmp(linea, "ADIOS\r\n") == 0) {
@@ -793,10 +769,8 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado, int *inten
 			}
 
             if (strncmp(mensaje, "RESPUESTA", 9) == 0) {
-                printf("Sintaxis ""RESPUESTA"" correcta\n");
                 int numero;
                 if (sscanf(mensaje + 10, "%d", &numero) == 1) {
-                    printf("Sintaxis ""RESPUESTA (n)"" correcta\n");
                     if (numero == respuestas[*pregunta]) {
                         *estado = STATE_WAIT_ADIOS;
                         strcpy(respuesta, "S:350 ACIERTO");
@@ -832,7 +806,6 @@ char *analizadorSintactico(char *mensaje, int *pregunta, int *estado, int *inten
             }
             break;
         case STATE_WAIT_ADIOS:
-            printf("Estado: STATE_WAIT_ADIOS\n");
             if (strcmp(linea, "ADIOS\r\n") == 0) {
                 strcpy(respuesta, "S:221 Cerrando el servicio");
                 *estado = STATE_DONE;
